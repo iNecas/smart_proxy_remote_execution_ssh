@@ -7,22 +7,23 @@ module Proxy::RemoteExecution::Ssh
   class Dispatcher < ::Dynflow::Actor
     # command comming from action
     class Command
-      attr_reader :id, :host, :ssh_user, :effective_user, :script, :host_public_key, :suspended_action
+      attr_reader :id, :host, :ssh_user, :effective_user, :script, :host_public_key, :suspended_action, :connection_options
 
       def initialize(data)
         validate!(data)
 
-        @id               = data[:id]
-        @host             = data[:host]
-        @ssh_user         = data[:ssh_user]
-        @effective_user   = data[:effective_user]
-        @script           = data[:script]
-        @host_public_key  = data[:host_public_key]
-        @suspended_action = data[:suspended_action]
+        @id                 = data[:id]
+        @host               = data[:host]
+        @ssh_user           = data[:ssh_user]
+        @effective_user     = data[:effective_user]
+        @script             = data[:script]
+        @host_public_key    = data[:host_public_key]
+        @suspended_action   = data[:suspended_action]
+        @connection_options = data[:connection_options]
       end
 
       def validate!(data)
-        required_fields = [:id, :host, :ssh_user, :script, :suspended_action]
+        required_fields = [:id, :host, :ssh_user, :script, :suspended_action, :connection_options]
         missing_fields = required_fields.find_all { |f| !data[f] }
         raise ArgumentError, "Missing fields: #{missing_fields}" unless missing_fields.empty?
       end
@@ -46,6 +47,15 @@ module Proxy::RemoteExecution::Ssh
       end
     end
 
+    class ConnectionTimeout
+      attr_reader :retry_number, :exception
+
+      def initialize(retry_number, exception)
+        @retry_number = retry_number
+        @exception = exception
+      end
+    end
+
     def initialize(options = {})
       @clock                   = options[:clock] || Dynflow::Clock.spawn('proxy-dispatcher-clock')
       @logger                  = options[:logger] || Logger.new($stderr)
@@ -60,7 +70,7 @@ module Proxy::RemoteExecution::Ssh
       @refresh_planned = false
     end
 
-    def initialize_command(command)
+    def initialize_command(command, retry_number = nil)
       @logger.debug("initalizing command [#{command}]")
       connector = self.connector_for_command(command)
       remote_script = cp_script_to_remote(connector, command)
@@ -72,6 +82,8 @@ module Proxy::RemoteExecution::Ssh
       connector.async_run("#{su_prefix}#{remote_script} | /usr/bin/tee #{output_path}") do |data|
         command_buffer(command) << data
       end
+    rescue ::Net::SSH::ConnectionTimeout, Errno::ECONNREFUSED, Errno::EHOSTUNREACH, Errno::ETIMEDOUT => e
+      command.suspended_action << Dispatcher::ConnectionTimeout.new(retry_number || 0, e)
     rescue => e
       @logger.error("error while initalizing command #{e.class} #{e.message}:\n #{e.backtrace.join("\n")}")
       command_buffer(command).concat([Connector::DebugData.new("Exception: #{e.class} #{e.message}"),
@@ -176,7 +188,9 @@ module Proxy::RemoteExecution::Ssh
       options = { :logger => @logger }
       options[:known_hosts_file] = prepare_known_hosts(command)
       options[:client_private_key_file] = @client_private_key_file
-      @connector_class.new(command.host, command.ssh_user, options)
+      @connector_class.new(command.host, command.ssh_user, options).tap do |connector|
+        connector.initialize_session command
+      end
     end
 
     def prepare_known_hosts(command)
@@ -222,6 +236,10 @@ module Proxy::RemoteExecution::Ssh
 
     def finish_command(command)
       @command_buffer.delete(command)
+    end
+
+    def retry_command_init(command, retry_number)
+      @clock.ping(reference, Time.now + command.connection_options[:retry_interval], [:initialize_command, command, retry_number])
     end
 
     def plan_next_refresh

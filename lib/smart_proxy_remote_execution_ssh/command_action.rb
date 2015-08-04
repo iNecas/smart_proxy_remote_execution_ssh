@@ -26,6 +26,16 @@ module Proxy::RemoteExecution::Ssh
         end
       when Dynflow::Action::Cancellable::Cancel
         kill_run
+      when Dispatcher::ConnectionTimeout
+        input[:remaining_retries] = command.connection_options[:retry_count] - event.retry_number
+        if event.retry_number < command.connection_options[:retry_count]
+          Proxy::RemoteExecution::Ssh
+            .dispatcher
+            .tell([:retry_command_init, command, event.retry_number + 1])
+          suspend
+        else
+          raise event.exception
+        end
       when Dynflow::Action::Skip
         # do nothing
       else
@@ -43,14 +53,18 @@ module Proxy::RemoteExecution::Ssh
     end
 
     def command
-      @command ||= Dispatcher::Command.new(:id               => input[:task_id],
-                                           :host             => input[:hostname],
-                                           :ssh_user         => 'root',
-                                           :effective_user   => input[:effective_user],
-                                           :script           => input[:script],
-                                           :host_public_key  => input[:host_public_key],
-                                           :verify_host      => input[:verify_host],
-                                           :suspended_action => suspended_action)
+      # TODO: Insert sane defaults here
+      default_connection_options = { :retry_count => 3, :retry_interval => 10, :timeout => 0.1 }
+      connection_options = default_connection_options.merge(input.fetch(:connection_options, {}).symbolize_keys)
+      @command ||= Dispatcher::Command.new(:id                 => input[:task_id],
+                                           :host               => input[:hostname],
+                                           :ssh_user           => 'root',
+                                           :effective_user     => input[:effective_user],
+                                           :script             => input[:script],
+                                           :host_public_key    => input[:host_public_key],
+                                           :verify_host        => input[:verify_host],
+                                           :suspended_action   => suspended_action,
+                                           :connection_options => connection_options)
     end
 
     def init_run

@@ -158,13 +158,18 @@ module Proxy::RemoteExecution::Ssh
       @session.close unless @session.nil? || @session.closed?
     end
 
+    def initialize_session(command)
+      unless session
+        @logger.debug("opening session to #{@user}@#{@host}")
+        options = ssh_options.merge(:timeout => command.connection_options[:timeout])
+        @session = Net::SSH.start(@host, @user, options)
+      end
+    end
+
     private
 
     def session
-      @session ||= begin
-                     @logger.debug("opening session to #{@user}@#{@host}")
-                     Net::SSH.start(@host, @user, ssh_options)
-                   end
+      @session
     end
 
     def ssh_options
