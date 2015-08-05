@@ -27,15 +27,7 @@ module Proxy::RemoteExecution::Ssh
       when Dynflow::Action::Cancellable::Cancel
         kill_run
       when Dispatcher::ConnectionTimeout
-        input[:remaining_retries] = command.connection_options[:retry_count] - event.retry_number
-        if event.retry_number < command.connection_options[:retry_count]
-          Proxy::RemoteExecution::Ssh
-            .dispatcher
-            .tell([:retry_command_init, command, event.retry_number + 1])
-          suspend
-        else
-          raise event.exception
-        end
+        handle_timeout event
       when Dynflow::Action::Skip
         # do nothing
       else
@@ -65,6 +57,18 @@ module Proxy::RemoteExecution::Ssh
                                            :verify_host        => input[:verify_host],
                                            :suspended_action   => suspended_action,
                                            :connection_options => connection_options)
+    end
+
+    def handle_timeout(event)
+      input[:remaining_retries] = command.connection_options[:retry_count] - event.retry_number
+      if event.retry_number < command.connection_options[:retry_count]
+        world.clock.ping(Proxy::RemoteExecution::Ssh.dispatcher,
+                         Time.now + command.connection_options[:retry_interval],
+                         [:initialize_command, command, event.retry_number + 1])
+        suspend
+      else
+        raise event.exception
+      end
     end
 
     def init_run

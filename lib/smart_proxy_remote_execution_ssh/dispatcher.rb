@@ -238,10 +238,6 @@ module Proxy::RemoteExecution::Ssh
       @command_buffer.delete(command)
     end
 
-    def retry_command_init(command, retry_number)
-      @clock.ping(reference, Time.now + command.connection_options[:retry_interval], [:initialize_command, command, retry_number])
-    end
-
     def plan_next_refresh
       if @connectors.any? && !@refresh_planned
         @logger.debug("planning to refresh")

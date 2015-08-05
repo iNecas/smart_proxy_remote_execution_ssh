@@ -99,8 +99,7 @@ module Proxy::RemoteExecution::Ssh
       dispatcher.expects(:tell)
       action = run_action action
       action.input.key?(:remaining_retries).must_equal false
-      dispatcher.expects(:tell).with([:retry_command_init, action.command, 1])
-      dispatcher.expects(:tell).with([:retry_command_init, action.command, 2])
+      action.world.clock.expects(:ping).twice
       action = run_action action, event.call(0)
       action.state.must_equal :suspended
       action.input[:remaining_retries].must_equal 2
