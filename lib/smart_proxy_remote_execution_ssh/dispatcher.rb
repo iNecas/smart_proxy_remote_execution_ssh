@@ -46,6 +46,14 @@ module Proxy::RemoteExecution::Ssh
       end
     end
 
+    class InitializationError
+      attr_reader :exception
+
+      def initialize(exception)
+        @exception = exception
+      end
+    end
+
     def initialize(options = {})
       @clock                   = options[:clock] || Dynflow::Clock.spawn('proxy-dispatcher-clock')
       @logger                  = options[:logger] || Logger.new($stderr)
@@ -72,6 +80,8 @@ module Proxy::RemoteExecution::Ssh
       connector.async_run("#{su_prefix}#{remote_script} | /usr/bin/tee #{output_path}") do |data|
         command_buffer(command) << data
       end
+    rescue ::Net::SSH::ConnectionTimeout, Errno::ECONNREFUSED, Errno::EHOSTUNREACH, Errno::ETIMEDOUT => e
+      command.suspended_action << InitializationError.new(e)
     rescue => e
       @logger.error("error while initalizing command #{e.class} #{e.message}:\n #{e.backtrace.join("\n")}")
       command_buffer(command).concat([Connector::DebugData.new("Exception: #{e.class} #{e.message}"),
