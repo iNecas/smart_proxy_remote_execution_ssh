@@ -95,6 +95,7 @@ module Proxy::RemoteExecution::Ssh
                           Dispatcher::InitializationError.new(Errno::ECONNREFUSED.new('Connection refused'))
       action.state.must_equal :success
       action.output[:result].must_equal 'initialization_error'
+      action.output[:metadata][:exception_class].must_equal 'Errno::ECONNREFUSED'
       action = finalize_action action
       action.state.must_equal :error
     end

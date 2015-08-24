@@ -26,8 +26,9 @@ module Proxy::RemoteExecution::Ssh
         end
       when Dispatcher::InitializationError
         output[:result] = 'initialization_error'
-        output[:exception_class] = event.exception.class.to_s
-        output[:exception_message] = event.exception.message
+        output[:metadata] ||= {}
+        output[:metadata][:exception_class] = event.exception.class.to_s
+        output[:metadata][:exception_message] = event.exception.message
       when Dynflow::Action::Cancellable::Cancel
         kill_run
       when Dynflow::Action::Skip
