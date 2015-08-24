@@ -84,5 +84,20 @@ module Proxy::RemoteExecution::Ssh
       action = run_action action, Dynflow::Action::Skip
       action.state.must_equal :success
     end
+
+    it 'handles initialization error' do
+      action = create_and_plan_action CommandAction, command_input
+      dispatcher.expects(:tell)
+      action = run_action action
+      action.state.must_equal :suspended
+
+      action = run_action action,
+                          Dispatcher::InitializationError.new(Errno::ECONNREFUSED.new('Connection refused'))
+      action.state.must_equal :success
+      action.output[:result].must_equal 'initialization_error'
+      action.output[:metadata][:exception_class].must_equal 'Errno::ECONNREFUSED'
+      action = finalize_action action
+      action.state.must_equal :error
+    end
   end
 end
