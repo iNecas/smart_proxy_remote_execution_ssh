@@ -35,6 +35,9 @@ module Support
       end
     end
 
+    def initialize_session(command)
+    end
+
     def inactive?
       self.class.inactive?
     end

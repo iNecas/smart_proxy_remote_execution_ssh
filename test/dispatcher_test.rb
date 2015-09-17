@@ -16,12 +16,21 @@ module Proxy::RemoteExecution::Ssh
       []
     end
 
+    let :connection_options do
+      {
+        :retry_count => 2,
+        :retry_interval => 10,
+        :timeout => 0.25
+      }
+    end
+
     let :command do
-      Dispatcher::Command.new(:id               => '123',
-                              :host             => 'test.example.com',
-                              :ssh_user         => 'root',
-                              :script           => 'cat /etc/motd',
-                              :suspended_action => suspended_action_events)
+      Dispatcher::Command.new(:id                 => '123',
+                              :host               => 'test.example.com',
+                              :ssh_user           => 'root',
+                              :script             => 'cat /etc/motd',
+                              :suspended_action   => suspended_action_events,
+                              :connection_options => connection_options)
     end
 
     let :mocked_async_run_data do
@@ -60,12 +69,14 @@ module Proxy::RemoteExecution::Ssh
 
     describe 'using effective user' do
       let :command do
-        Dispatcher::Command.new(:id               => '123',
-                                :host             => 'test.example.com',
-                                :ssh_user         => 'root',
-                                :effective_user   => 'guest',
-                                :script           => 'cat /etc/motd',
-                                :suspended_action => suspended_action_events)
+        Dispatcher::Command.new(:id                 => '123',
+                                :host               => 'test.example.com',
+                                :ssh_user           => 'root',
+                                :effective_user     => 'guest',
+                                :script             => 'cat /etc/motd',
+                                :suspended_action   => suspended_action_events,
+                                :connection_options => connection_options
+                               )
       end
 
       it 'uses su to set the use to the effecitve one' do
@@ -92,13 +103,14 @@ module Proxy::RemoteExecution::Ssh
     describe 'host pubilc key' do
       describe 'the public key was provided' do
         let(:command) do
-          Dispatcher::Command.new(:id               => '123',
-                                  :host             => 'test.example.com',
-                                  :ssh_user         => 'root',
-                                  :host_public_key  => '===host-public-key===',
-                                  :effective_user   => 'guest',
-                                  :script           => 'cat /etc/motd',
-                                  :suspended_action => suspended_action_events)
+          Dispatcher::Command.new(:id                 => '123',
+                                  :host               => 'test.example.com',
+                                  :ssh_user           => 'root',
+                                  :host_public_key    => '===host-public-key===',
+                                  :effective_user     => 'guest',
+                                  :script             => 'cat /etc/motd',
+                                  :suspended_action   => suspended_action_events,
+                                  :connection_options => connection_options)
         end
 
         it 'it saves the public key to the known hosts' do

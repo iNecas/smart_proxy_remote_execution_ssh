@@ -4,11 +4,18 @@ module Proxy::RemoteExecution::Ssh
   class CommandActionTest < MiniTest::Spec
     include ::Dynflow::Testing
 
+    let :connection_options do
+      { :retry_count    => 2,
+        :retry_interval => 10,
+        :timeout        => 0.25 }
+    end
+
     let :command_input do
-      { :task_id        => '123',
-        :hostname       => 'test.example.com',
-        :effective_user => 'guest',
-        :script         => 'echo "Hello world"' }
+      { :task_id            => '123',
+        :hostname           => 'test.example.com',
+        :effective_user     => 'guest',
+        :script             => 'echo "Hello world"',
+        :connection_options => connection_options }
     end
 
     let :dispatcher do
@@ -29,6 +36,7 @@ module Proxy::RemoteExecution::Ssh
         command.effective_user.must_equal command_input[:effective_user]
         command.script.must_equal command_input[:script]
         command.suspended_action.must_be_kind_of ::Dynflow::Action::Suspended
+        command.connection_options.must_equal connection_options
       end
       run_action action
     end
@@ -83,6 +91,24 @@ module Proxy::RemoteExecution::Ssh
 
       action = run_action action, Dynflow::Action::Skip
       action.state.must_equal :success
+    end
+
+    it 'raises the connection error after ' do
+      event = ->(num) { Dispatcher::ConnectionTimeout.new(num, Errno::ECONNREFUSED.new('error')) }
+      action = create_and_plan_action CommandAction, command_input
+      dispatcher.expects(:tell)
+      action = run_action action
+      action.input.key?(:remaining_retries).must_equal false
+      action.world.clock.expects(:ping).twice
+      action = run_action action, event.call(0)
+      action.state.must_equal :suspended
+      action.input[:remaining_retries].must_equal 2
+      action = run_action action, event.call(1)
+      action.state.must_equal :suspended
+      action.input[:remaining_retries].must_equal 1
+      proc { action = run_action action, event.call(2) }.must_raise Errno::ECONNREFUSED
+      action.state.must_equal :error
+      action.input[:remaining_retries].must_equal 0
     end
   end
 end
