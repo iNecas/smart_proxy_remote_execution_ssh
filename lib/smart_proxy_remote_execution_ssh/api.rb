@@ -40,13 +40,31 @@ module Proxy::RemoteExecution
       def ssh_on_socket(socket, command, ssh_user, host, ssh_options)
         started = false
         err_buf = ""
+        socket.extend(Net::SSH::BufferedIo)
+
+        send_start = -> {
+          if !started
+            started = true
+            socket.enqueue("Status: 101\r\n")
+            socket.enqueue("Connection: upgrade\r\n")
+            socket.enqueue("Upgrade: raw\r\n")
+            socket.enqueue("\r\n")
+          end
+        }
+
+        send_error = -> (code, msg) {
+          socket.enqueue("Status: #{code}\r\n")
+          socket.enqueue("Connection: close\r\n")
+          socket.enqueue("\r\n")
+          socket.enqueue(msg)
+        }
+
         begin
           Net::SSH.start(host, ssh_user, ssh_options) do |ssh|
             channel = ssh.open_channel do |ch|
               ch.exec(command) do |ch, success|
                 raise "could not execute command" unless success
 
-                socket.extend(Net::SSH::BufferedIo)
                 ssh.listen_to(socket)
 
                 ch.on_process do
@@ -59,21 +77,21 @@ module Proxy::RemoteExecution
                 end
 
                 ch.on_data do |ch2, data|
-                  if !started
-                    started = true
-                    socket.enqueue("Status: 101\r\n")
-                    socket.enqueue("Connection: upgrade\r\n")
-                    socket.enqueue("Upgrade: raw\r\n")
-                    socket.enqueue("\r\n")
-                  end
+                  send_start.call
                   socket.enqueue(data)
                 end
 
                 ch.on_request('exit-status') do |ch, data|
+                  code = data.read_long
+                  if code == 0
+                    send_start.call
+                  end
+                  err_buf += "Process exited with code #{code}.\r\n"
                   ch.close
                 end
 
                 channel.on_request('exit-signal') do |ch, data|
+                  err_buf += "Process was terminated with signal #{data.read_string}.\r\n"
                   ch.close
                 end
 
@@ -85,14 +103,18 @@ module Proxy::RemoteExecution
 
             channel.wait
             if !started
-              socket.enqueue("Status: 400\r\n")
-              socket.enqueue("Connection: close\r\n")
-              socket.enqueue("\r\n")
-              socket.enqueue(err_buf)
-              socket.wait_for_pending_sends
-              socket.close
+              send_error.call(400, err_buf)
             end
           end
+        rescue Net::SSH::AuthenticationFailed => e
+          send_error.call(401, e.message)
+        rescue Exception => e
+          # TODO - log the backtrace
+          send_error.call(501, "Internal error")
+        end
+        if not socket.closed?
+          socket.wait_for_pending_sends
+          socket.close
         end
       end
 
