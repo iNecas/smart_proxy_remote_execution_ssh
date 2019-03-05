@@ -110,7 +110,8 @@ module Proxy::RemoteExecution
         rescue Net::SSH::AuthenticationFailed => e
           send_error.call(401, e.message)
         rescue Exception => e
-          # TODO - log the backtrace
+          logger.error e.message
+          e.backtrace.each { |line| logger.debug line }
           send_error.call(500, "Internal error")
         end
         if not socket.closed?
