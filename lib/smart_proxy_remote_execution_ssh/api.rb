@@ -28,7 +28,9 @@ module Proxy::RemoteExecution
         ssh_options[:number_of_password_prompts] = 1
 
         socket = nil
-        if env['rack.hijack?']
+        if env['WEBRICK_SOCKET']
+          socket = env['WEBRICK_SOCKET']
+        elsif env['rack.hijack?']
           env['rack.hijack'].call
           socket = env['rack.hijack_io']
         end
