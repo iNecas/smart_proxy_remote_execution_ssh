@@ -1,3 +1,5 @@
+require 'net/ssh'
+
 module Proxy::RemoteExecution
   module Ssh
     class Api < ::Sinatra::Base
@@ -22,7 +24,7 @@ module Proxy::RemoteExecution
         ssh_options[:passphrase] = params[:ssh_key_passphrase] if params[:ssh_key_passphrase]
         ssh_options[:keys_only] = true
         ssh_options[:auth_methods] = methods
-        ssh_options[:verify_host_key] = :accept_new_or_local_tunnel
+        ssh_options[:verify_host_key] = true
         ssh_options[:number_of_password_prompts] = 1
 
         socket = nil
