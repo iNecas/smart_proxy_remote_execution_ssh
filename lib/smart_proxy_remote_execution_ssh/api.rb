@@ -6,7 +6,7 @@ module Proxy::RemoteExecution
       end
       post "/session" do
         if env["HTTP_CONNECTION"] != "upgrade" or env["HTTP_UPGRADE"] != "raw"
-          return [ 401, "Invalid request: /ssh/session requires connection upgrade to 'raw'" ]
+          return [ 400, "Invalid request: /ssh/session requires connection upgrade to 'raw'" ]
         end
         socket = nil
         if env['rack.hijack?']
@@ -110,7 +110,7 @@ module Proxy::RemoteExecution
           send_error.call(401, e.message)
         rescue Exception => e
           # TODO - log the backtrace
-          send_error.call(501, "Internal error")
+          send_error.call(500, "Internal error")
         end
         if not socket.closed?
           socket.wait_for_pending_sends
