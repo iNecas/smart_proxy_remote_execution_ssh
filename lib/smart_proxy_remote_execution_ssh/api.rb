@@ -8,14 +8,6 @@ module Proxy::RemoteExecution
         if env["HTTP_CONNECTION"] != "upgrade" or env["HTTP_UPGRADE"] != "raw"
           return [ 400, "Invalid request: /ssh/session requires connection upgrade to 'raw'" ]
         end
-        socket = nil
-        if env['rack.hijack?']
-          env['rack.hijack'].call
-          socket = env['rack.hijack_io']
-        end
-        if !socket
-          return [ 501, "Internal error: request hijacking not available" ]
-        end
 
         params = MultiJson.load(env["rack.input"].read)
         key_file = Proxy::RemoteExecution::Ssh.private_key_file
@@ -32,6 +24,15 @@ module Proxy::RemoteExecution
         ssh_options[:auth_methods] = methods
         ssh_options[:verify_host_key] = :accept_new_or_local_tunnel
         ssh_options[:number_of_password_prompts] = 1
+
+        socket = nil
+        if env['rack.hijack?']
+          env['rack.hijack'].call
+          socket = env['rack.hijack_io']
+        end
+        if !socket
+          return [ 501, "Internal error: request hijacking not available" ]
+        end
 
         ssh_on_socket(socket, params["command"], params["ssh_user"], params["hostname"], ssh_options)
         101
