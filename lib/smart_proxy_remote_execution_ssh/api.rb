@@ -18,7 +18,7 @@ module Proxy::RemoteExecution
         end
 
         params = MultiJson.load(env["rack.input"].read)
-        key_file = ForemanRemoteExecutionCore.settings.fetch(:ssh_identity_key_file)
+        key_file = Proxy::RemoteExecution::Ssh.private_key_file
 
         methods = %w(publickey)
         methods.unshift('password') if params["ssh_password"]
