@@ -56,7 +56,10 @@ module Proxy::RemoteExecution
         if env['WEBRICK_SOCKET']
           socket = env['WEBRICK_SOCKET']
         elsif env['rack.hijack?']
-          env['rack.hijack'].call
+          begin
+            env['rack.hijack'].call
+          rescue NotImplementedError
+          end
           socket = env['rack.hijack_io']
         end
         if !socket
