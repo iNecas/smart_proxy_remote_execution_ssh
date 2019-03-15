@@ -21,6 +21,44 @@ module Puma
   end
 end
 
+module OpenSSL
+  module SSL
+    class SSLSocket
+      def closed?
+        io.closed?
+      end
+
+      def recv(n)
+        res = ""
+        begin
+          # To drain a SSLSocket before we can go back to the event
+          # loop, we need to repeatedly call read_nonblock; a single
+          # call is not enough.
+          while true
+            res += read_nonblock(n)
+          end
+        rescue IO::WaitReadable
+          res
+        rescue IO::WaitWritable
+          IO.select(nil, [io])
+          retry
+        end
+      end
+
+      def send(mesg, flags)
+        begin
+          write_nonblock(mesg)
+        rescue IO::WaitWritable
+          0
+        rescue IO::WaitReadable
+          IO.select([io])
+          retry
+        end
+      end
+    end
+  end
+end
+
 module Proxy::RemoteExecution
   module Ssh
     class Api < ::Sinatra::Base
