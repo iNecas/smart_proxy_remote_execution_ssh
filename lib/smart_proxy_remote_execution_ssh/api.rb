@@ -144,7 +144,7 @@ module Proxy::RemoteExecution
         rescue Exception => e
           logger.error e.message
           e.backtrace.each { |line| logger.debug line }
-          send_error.call(500, "Internal error")
+          send_error.call(500, "Internal error") unless started
         end
         if not socket.closed?
           socket.wait_for_pending_sends
