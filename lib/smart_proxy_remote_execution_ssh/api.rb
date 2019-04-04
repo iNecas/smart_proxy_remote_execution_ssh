@@ -1,9 +1,10 @@
 require 'net/ssh'
 
-# When hijacking the socket of a TLS connection with Puma, we get a
-# Puma::MiniSSL::Socket, which isn't really a Socket.  We need to add
-# recv and send for the benefit of the Net::SSH::BufferedIo mixin, and
-# closed? for our own convenience.
+# When hijacking the socket of a TLS connection, we get a
+# OpenSSL::SSL::SSLSocket or Puma::MiniSSL::Socket, which don't behave
+# the same as real IO::Sockets.  We need to add recv and send for the
+# benefit of the Net::SSH::BufferedIo mixin, and closed? for our own
+# convenience.
 
 module Puma
   module MiniSSL
@@ -24,10 +25,6 @@ end
 module OpenSSL
   module SSL
     class SSLSocket
-      def closed?
-        io.closed?
-      end
-
       def recv(n)
         res = ""
         begin
@@ -38,8 +35,18 @@ module OpenSSL
             res += read_nonblock(n)
           end
         rescue IO::WaitReadable
-          res
+          # Sometimes there is no payload after reading everything
+          # from the underlying socket, but a empty string is treated
+          # as EOF by Net::SSH. So we block a bit until we have
+          # something to return.
+          if res == ""
+            IO.select([io])
+            retry
+          else
+            res
+          end
         rescue IO::WaitWritable
+          # A renegotiation is happening, let it proceed.
           IO.select(nil, [io])
           retry
         end
