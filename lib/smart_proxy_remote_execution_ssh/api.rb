@@ -186,6 +186,12 @@ module Proxy::RemoteExecution
           end
         rescue Net::SSH::AuthenticationFailed => e
           send_error.call(401, e.message)
+        rescue Errno::EHOSTUNREACH
+          send_error.call(400, "No route to #{host}")
+        rescue SystemCallError => e
+          send_error.call(400, e.message)
+        rescue SocketError => e
+          send_error.call(400, e.message)
         rescue Exception => e
           logger.error e.message
           e.backtrace.each { |line| logger.debug line }
