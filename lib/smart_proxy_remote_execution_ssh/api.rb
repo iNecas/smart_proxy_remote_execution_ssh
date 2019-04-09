@@ -1,4 +1,5 @@
 require 'net/ssh'
+require 'forwardable'
 
 # When hijacking the socket of a TLS connection, we get a
 # OpenSSL::SSL::SSLSocket or Puma::MiniSSL::Socket, which don't behave
@@ -6,25 +7,56 @@ require 'net/ssh'
 # benefit of the Net::SSH::BufferedIo mixin, and closed? for our own
 # convenience.
 
-module Puma
-  module MiniSSL
-    class Socket
-      def closed?
-        @socket.closed?
+
+module Proxy::RemoteExecution
+  module Ssh
+    class BufferedSocket
+      include Net::SSH::BufferedIo
+      extend Forwardable
+
+      # The list of methods taken from OpenSSL::SSL::SocketForwarder for the object to act like a socket
+      def_delegators(:@socket, :to_io, :addr, :peeraddr, :setsockopt, :getsockopt, :fcntl, :close, :closed?, :do_not_reverse_lookup=)
+
+      def initialize(socket)
+        @socket = socket
+        initialize_buffered_io
       end
-      def recv(n)
-        readpartial(n)
+
+      def resv
+        raise NotImplementedError
       end
-      def send(mesg, flags)
-        write(mesg)
+
+      def send
+        raise NotImplementedError
+      end
+
+      def self.applies_for?(socket)
+        raise NotImplementedError
+      end
+
+      def self.build(socket)
+        klass = [PumaBufferedSocket, OpenSSLBufferedSocket, StandardBufferedSocket].find do |potential_class|
+          potential_class.applies_for?(socket)
+        end
+        raise "No suitable implementation of buffered socket available for #{socket.inspect}" unless klass
+        klass.new(socket)
       end
     end
-  end
-end
 
-module OpenSSL
-  module SSL
-    class SSLSocket
+    class StandardBufferedSocket < BufferedSocket
+      def_delegators(:@socket, :send, :recv)
+
+      def self.applies_for?(socket)
+        socket.respond_to?(:send) && socket.respond_to?(:recv)
+      end
+    end
+
+    class OpenSSLBufferedSocket < BufferedSocket
+      def self.applies_for?(socket)
+        socket.is_a? ::OpenSSL::SSL::SSLSocket
+      end
+      def_delegators(:@socket, :read_nonblock, :write_nonblock, :close)
+
       def recv(n)
         res = ""
         begin
@@ -32,7 +64,7 @@ module OpenSSL
           # loop, we need to repeatedly call read_nonblock; a single
           # call is not enough.
           while true
-            res += read_nonblock(n)
+            res += @socket.read_nonblock(n)
           end
         rescue IO::WaitReadable
           # Sometimes there is no payload after reading everything
@@ -40,34 +72,45 @@ module OpenSSL
           # as EOF by Net::SSH. So we block a bit until we have
           # something to return.
           if res == ""
-            IO.select([io])
+            IO.select([@socket.to_io])
             retry
           else
             res
           end
         rescue IO::WaitWritable
           # A renegotiation is happening, let it proceed.
-          IO.select(nil, [io])
+          IO.select(nil, [@socket.to_io])
           retry
         end
       end
 
       def send(mesg, flags)
         begin
-          write_nonblock(mesg)
+          @socket.write_nonblock(mesg)
         rescue IO::WaitWritable
           0
         rescue IO::WaitReadable
-          IO.select([io])
+          IO.select([@socket.to_io])
           retry
         end
       end
     end
-  end
-end
 
-module Proxy::RemoteExecution
-  module Ssh
+    class PumaBufferedSocket < BufferedSocket
+      def self.applies_for?(socket)
+        return false unless defined? Puma::MiniSSL::Socket
+        socket.is_a? ::Puma::MiniSSL::Socket
+      end
+
+      def recv(n)
+        @socket.readpartial(n)
+      end
+
+      def send(mesg, flags)
+        @socket.write(mesg)
+      end
+    end
+
     class Api < ::Sinatra::Base
       include Sinatra::Authorization::Helpers
 
@@ -118,7 +161,7 @@ module Proxy::RemoteExecution
       def ssh_on_socket(socket, command, ssh_user, host, ssh_options)
         started = false
         err_buf = ""
-        socket.extend(Net::SSH::BufferedIo)
+        socket = BufferedSocket.build(socket)
 
         send_start = -> {
           if !started
