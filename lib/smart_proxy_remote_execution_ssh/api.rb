@@ -22,7 +22,7 @@ module Proxy::RemoteExecution
         initialize_buffered_io
       end
 
-      def resv
+      def recv
         raise NotImplementedError
       end
 
@@ -35,7 +35,7 @@ module Proxy::RemoteExecution
       end
 
       def self.build(socket)
-        klass = [PumaBufferedSocket, OpenSSLBufferedSocket, StandardBufferedSocket].find do |potential_class|
+        klass = [OpenSSLBufferedSocket, StandardBufferedSocket].find do |potential_class|
           potential_class.applies_for?(socket)
         end
         raise "No suitable implementation of buffered socket available for #{socket.inspect}" unless klass
@@ -96,21 +96,6 @@ module Proxy::RemoteExecution
       end
     end
 
-    class PumaBufferedSocket < BufferedSocket
-      def self.applies_for?(socket)
-        return false unless defined? Puma::MiniSSL::Socket
-        socket.is_a? ::Puma::MiniSSL::Socket
-      end
-
-      def recv(n)
-        @socket.readpartial(n)
-      end
-
-      def send(mesg, flags)
-        @socket.write(mesg)
-      end
-    end
-
     class Api < ::Sinatra::Base
       include Sinatra::Authorization::Helpers
 
@@ -164,7 +149,7 @@ module Proxy::RemoteExecution
         socket = BufferedSocket.build(socket)
 
         send_start = -> {
-          if !started
+          unless started
             started = true
             socket.enqueue("Status: 101\r\n")
             socket.enqueue("Connection: upgrade\r\n")
@@ -204,9 +189,7 @@ module Proxy::RemoteExecution
 
                 ch.on_request('exit-status') do |ch, data|
                   code = data.read_long
-                  if code == 0
-                    send_start.call
-                  end
+                  send_start.call if code.zero?
                   err_buf += "Process exited with code #{code}.\r\n"
                   ch.close
                 end
@@ -240,7 +223,7 @@ module Proxy::RemoteExecution
           e.backtrace.each { |line| logger.debug line }
           send_error.call(500, "Internal error") unless started
         end
-        if not socket.closed?
+        unless socket.closed?
           socket.wait_for_pending_sends
           socket.close
         end
